@@ -46,3 +46,30 @@ Fired when a touch starts. Passes `TouchEvent` to handler.
 ## `touchend`
 
 Fired when a touch ends. Passes `TouchEvent` to handler.
+
+## Panorama view events
+
+| Event              | Data                    | Description   |
+| ------------------ | ----------------------  | ------------- |
+| movestart          | [ViewEvent](#ViewEvent) | Fired when the user start moving in the panorama (start dragging, look animation ...). |
+| move               | [ViewEvent](#ViewEvent) | Fired repeatedly as the user moves in the panorama. |
+| moveend            | [ViewEvent](#ViewEvent) | Fired when the user stop moving in the panorama (stop dragging, look animation ended). |
+
+# Event objects
+
+## ViewEvent
+
+Data about the view when the event was triggered. Exemple of event data view object  :
+```javascript
+{
+    "hfov": 94.569177,
+    "pitch": 20.2789,
+    "yaw": 0.25436,
+}
+```
+
+| Property          | Type      | Description                             |
+| ----------------- | --------- | --------------------------------------- |
+| hfov              | _number_  | Horizontal field of view in degrees     |
+| pitch             | _number_  | Pitch orientation in degrees            |
+| yaw               | _number_  | Yaw orientation in degrees              |

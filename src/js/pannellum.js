@@ -631,6 +631,18 @@ function clearError() {
 }
 
 /**
+ * Creates a ViewEvent object.
+ * @param {number} pitch - pitch in degrees
+ * @param {number} yaw - yaw in degrees
+ * @param {number} hfov - horizontal field of view in degrees
+ */
+function ViewEvent(pitch, yaw, hfov){
+    this.hfov = hfov;
+    this.pitch = pitch;
+    this.yaw = yaw;
+}
+
+/**
  * Displays about message.
  * @private
  * @param {MouseEvent} event - Right click location
@@ -1340,6 +1352,8 @@ function animateInit() {
     if (animating) {
         return;
     }
+    fireEvent('movestart', new ViewEvent(config.pitch, config.yaw, config.hfov));
+
     animating = true;
     animate();
 }
@@ -1350,6 +1364,7 @@ function animateInit() {
  */
 function animate() {
     render();
+    fireEvent('move', new ViewEvent(config.pitch, config.yaw, config.hfov));
     if (autoRotateStart)
         clearTimeout(autoRotateStart);
     if (isUserInteracting || orientation === true) {
@@ -1386,6 +1401,8 @@ function animate() {
             config.autoRotate = autoRotateSpeed;
             _this.lookAt(origPitch, undefined, origHfov, 3000);
             animateInit();
+        } else {
+            fireEvent('moveend', new ViewEvent(config.pitch, config.yaw, config.hfov));
         }
     }
 }
