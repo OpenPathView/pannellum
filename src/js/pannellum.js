@@ -67,11 +67,13 @@ var config,
     externalEventListeners = {},
     specifiedPhotoSphereExcludes = [],
     update = false, // Should we update when still to render dynamic content
+    eps = 1e-6,
     hotspotsCreated = false;
 
 var defaultConfig = {
     hfov: 100,
     minHfov: 50,
+    multiResMinHfov: false,
     maxHfov: 120,
     pitch: 0,
     minPitch: undefined,
@@ -106,6 +108,7 @@ var defaultConfig = {
     crossOrigin: 'anonymous',
     touchPanSpeedCoeffFactor: 1,
     capturedKeyNumbers: [16, 17, 27, 37, 38, 39, 40, 61, 65, 68, 83, 87, 107, 109, 173, 187, 189],
+    friction: 0.15
 };
 
 // Translatable / configurable strings
@@ -352,7 +355,7 @@ function init() {
         var onError = function(e) {
             var a = document.createElement('a');
             a.href = e.target.src;
-            a.innerHTML = a.href;
+            a.textContent = a.href;
             anError(config.strings.fileAccessError.replace('%s', a.outerHTML));
         };
         
@@ -367,7 +370,7 @@ function init() {
                 }
                 panoImage[i].onload = onLoad;
                 panoImage[i].onerror = onError;
-                panoImage[i].src = encodeURI(p);
+                panoImage[i].src = sanitizeURL(p);
             }
         }
     } else if (config.type == 'multires') {
@@ -392,8 +395,8 @@ function init() {
                 if (xhr.status != 200) {
                     // Display error if image can't be loaded
                     var a = document.createElement('a');
-                    a.href = encodeURI(p);
-                    a.innerHTML = a.href;
+                    a.href = p;
+                    a.textContent = a.href;
                     anError(config.strings.fileAccessError.replace('%s', a.outerHTML));
                 }
                 var img = this.response;
@@ -669,8 +672,9 @@ function aboutMessage(event) {
 function mousePosition(event) {
     var bounds = container.getBoundingClientRect();
     var pos = {};
-    pos.x = event.clientX - bounds.left;
-    pos.y = event.clientY - bounds.top;
+    // pageX / pageY needed for iOS
+    pos.x = (event.clientX || event.pageX) - bounds.left;
+    pos.y = (event.clientY || event.pageY) - bounds.top;
     return pos;
 }
 
@@ -1011,7 +1015,6 @@ function onDocumentMouseWheel(event) {
         setHfov(config.hfov + event.detail * 1.5);
         speed.hfov = event.detail > 0 ? 1 : -1;
     }
-    
     animateInit();
 }
 
@@ -1257,19 +1260,19 @@ function keyRepeat() {
     // "Inertia"
     if (diff > 0 && !config.autoRotate) {
         // "Friction"
-        var friction = 0.85;
-        
+        var slowDownFactor = 1 - config.friction;
+
         // Yaw
         if (!keysDown[4] && !keysDown[5] && !keysDown[8] && !keysDown[9] && !animatedMove.yaw) {
-            config.yaw += speed.yaw * diff * friction;
+            config.yaw += speed.yaw * diff * slowDownFactor;
         }
         // Pitch
         if (!keysDown[2] && !keysDown[3] && !keysDown[6] && !keysDown[7] && !animatedMove.pitch) {
-            config.pitch += speed.pitch * diff * friction;
+            config.pitch += speed.pitch * diff * slowDownFactor;
         }
         // Zoom
         if (!keysDown[0] && !keysDown[1] && !animatedMove.hfov) {
-            setHfov(config.hfov + speed.hfov * diff * friction);
+            setHfov(config.hfov + speed.hfov * diff * slowDownFactor);
         }
     }
 
@@ -1312,11 +1315,7 @@ function animateMove(axis) {
         t.endPosition === t.startPosition) {
         result = t.endPosition;
         speed[axis] = 0;
-        var callback = animatedMove[axis].callback,
-            callbackArgs = animatedMove[axis].callbackArgs;
         delete animatedMove[axis];
-        if (typeof callback == 'function')
-            callback(callbackArgs);
     }
     config[axis] = result;
 }
@@ -1387,6 +1386,7 @@ function animate() {
     } else if (renderer && (renderer.isLoading() || (config.dynamic === true && update))) {
         requestAnimationFrame(animate);
     } else {
+        fireEvent('animatefinished', {pitch: _this.getPitch(), yaw: _this.getYaw(), hfov: _this.getHfov()});
         animating = false;
         prevTime = undefined;
         var autoRotateStartTime = config.autoRotateInactivityDelay -
@@ -1701,7 +1701,7 @@ function createHotSpot(hs) {
             p = hs.video;
         if (config.basePath && !absoluteURL(p))
             p = config.basePath + p;
-        video.src = encodeURI(p);
+        video.src = sanitizeURL(p);
         video.controls = true;
         video.style.width = hs.width + 'px';
         renderContainer.appendChild(div);
@@ -1711,11 +1711,11 @@ function createHotSpot(hs) {
         if (config.basePath && !absoluteURL(p))
             p = config.basePath + p;
         a = document.createElement('a');
-        a.href = encodeURI(hs.URL ? hs.URL : p);
+        a.href = sanitizeURL(hs.URL ? hs.URL : p);
         a.target = '_blank';
         span.appendChild(a);
         var image = document.createElement('img');
-        image.src = encodeURI(p);
+        image.src = sanitizeURL(p);
         image.style.width = hs.width + 'px';
         image.style.paddingTop = '5px';
         renderContainer.appendChild(div);
@@ -1723,8 +1723,14 @@ function createHotSpot(hs) {
         span.style.maxWidth = 'initial';
     } else if (hs.URL) {
         a = document.createElement('a');
-        a.href = encodeURI(hs.URL);
-        a.target = '_blank';
+        a.href = sanitizeURL(hs.URL);
+        if (hs.attributes) {
+            for (var key in hs.attributes) {
+                a.setAttribute(key, hs.attributes[key]);
+            }
+        } else {
+            a.target = '_blank';
+        }
         renderContainer.appendChild(a);
         div.className += ' pnlm-pointer';
         span.className += ' pnlm-pointer';
@@ -1947,7 +1953,7 @@ function processOptions(isPreview) {
             p = config.basePath + p;
         preview = document.createElement('div');
         preview.className = 'pnlm-preview-img';
-        preview.style.backgroundImage = "url('" + encodeURI(p) + "')";
+        preview.style.backgroundImage = "url('" + sanitizeURLForCss(p) + "')";
         renderContainer.appendChild(preview);
     }
 
@@ -1988,7 +1994,16 @@ function processOptions(isPreview) {
                 break;
             
             case 'fallback':
-                infoDisplay.errorMsg.innerHTML = '<p>Your browser does not support WebGL.<br><a href="' + encodeURI(config[key]) + '" target="_blank">Click here to view this panorama in an alternative viewer.</a></p>';
+                var link = document.createElement('a');
+                link.href = sanitizeURL(config[key]);
+                link.target = '_blank';
+                link.textContent = 'Click here to view this panorama in an alternative viewer.';
+                var message = document.createElement('p');
+                message.textContent = 'Your browser does not support WebGL.'
+                message.appendChild(document.createElement('br'));
+                message.appendChild(link);
+                infoDisplay.errorMsg.innerHTML = ''; // Removes all children nodes
+                infoDisplay.errorMsg.appendChild(message);
                 break;
             
             case 'hfov':
@@ -2114,7 +2129,7 @@ function onFullScreenChange() {
         controls.fullscreen.classList.remove('pnlm-fullscreen-toggle-button-active');
         fullscreenActive = false;
     }
-
+    fireEvent('fullscreenchange', fullscreenActive);
     // Resize renderer (deal with browser quirks and fixes #155)
     renderer.resize();
     setHfov(config.hfov);
@@ -2152,7 +2167,7 @@ function zoomOut() {
 function constrainHfov(hfov) {
     // Keep field of view within bounds
     var minHfov = config.minHfov;
-    if (config.type == 'multires' && renderer) {
+    if (config.type == 'multires' && renderer && config.multiResMinHfov) {
         minHfov = Math.min(minHfov, renderer.getCanvas().width / (config.multiRes.cubeResolution / 90 * 0.9));
     }
     if (minHfov > config.maxHfov) {
@@ -2186,6 +2201,7 @@ function constrainHfov(hfov) {
  */
 function setHfov(hfov) {
     config.hfov = constrainHfov(hfov);
+    fireEvent('zoomchange', config.hfov);
 }
 
 /**
@@ -2329,6 +2345,34 @@ function escapeHTML(s) {
 }
 
 /**
+ * Removes possibility of XSS attacks with URLs.
+ * The URL cannot be of protocol 'javascript'.
+ * @private
+ * @param {string} url - URL to sanitize
+ * @returns {string} Sanitized URL
+ */
+function sanitizeURL(url) {
+    if (url.trim().toLowerCase().indexOf('javascript:') === 0) {
+        return 'about:blank';
+    }
+    return url;
+}
+
+/**
+ * Removes possibility of XSS atacks with URLs for CSS.
+ * The URL will be sanitized with `sanitizeURL()` and single quotes
+ * and double quotes escaped.
+ * @private
+ * @param {string} url - URL to sanitize
+ * @returns {string} Sanitized URL
+ */
+function sanitizeURLForCss(url) {
+    return sanitizeURL(url)
+        .replace(/"/g, '%22')
+        .replace(/'/g, '%27');
+}
+
+/**
  * Checks whether or not a panorama is loaded.
  * @memberof Viewer
  * @instance
@@ -2359,16 +2403,22 @@ this.getPitch = function() {
  * @returns {Viewer} `this`
  */
 this.setPitch = function(pitch, animated, callback, callbackArgs) {
+    latestInteraction = Date.now();
+    if (Math.abs(pitch - config.pitch) <= eps) {
+        if (typeof callback == 'function')
+            callback(callbackArgs);
+        return this;
+    }
     animated = animated == undefined ? 1000: Number(animated);
     if (animated) {
         animatedMove.pitch = {
             'startTime': Date.now(),
             'startPosition': config.pitch,
             'endPosition': pitch,
-            'duration': animated,
-            'callback': callback,
-            'callbackArgs': callbackArgs
+            'duration': animated
         }
+        if (typeof callback == 'function')
+            setTimeout(function(){callback(callbackArgs)}, animated);
     } else {
         config.pitch = pitch;
     }
@@ -2420,6 +2470,12 @@ this.getYaw = function() {
  * @returns {Viewer} `this`
  */
 this.setYaw = function(yaw, animated, callback, callbackArgs) {
+    latestInteraction = Date.now();
+    if (Math.abs(yaw - config.yaw) <= eps) {
+        if (typeof callback == 'function')
+            callback(callbackArgs);
+        return this;
+    }
     animated = animated == undefined ? 1000: Number(animated);
     yaw = ((yaw + 180) % 360) - 180 // Keep in bounds
     if (animated) {
@@ -2433,10 +2489,10 @@ this.setYaw = function(yaw, animated, callback, callbackArgs) {
             'startTime': Date.now(),
             'startPosition': config.yaw,
             'endPosition': yaw,
-            'duration': animated,
-            'callback': callback,
-            'callbackArgs': callbackArgs
+            'duration': animated
         }
+        if (typeof callback == 'function')
+            setTimeout(function(){callback(callbackArgs)}, animated);
     } else {
         config.yaw = yaw;
     }
@@ -2488,16 +2544,22 @@ this.getHfov = function() {
  * @returns {Viewer} `this`
  */
 this.setHfov = function(hfov, animated, callback, callbackArgs) {
+    latestInteraction = Date.now();
+    if (Math.abs(hfov - config.hfov) <= eps) {
+        if (typeof callback == 'function')
+            callback(callbackArgs);
+        return this;
+    }
     animated = animated == undefined ? 1000: Number(animated);
     if (animated) {
         animatedMove.hfov = {
             'startTime': Date.now(),
             'startPosition': config.hfov,
             'endPosition': constrainHfov(hfov),
-            'duration': animated,
-            'callback': callback,
-            'callbackArgs': callbackArgs
+            'duration': animated
         }
+        if (typeof callback == 'function')
+            setTimeout(function(){callback(callbackArgs)}, animated);
     } else {
         setHfov(hfov);
     }
@@ -2543,16 +2605,20 @@ this.setHfovBounds = function(bounds) {
  */
 this.lookAt = function(pitch, yaw, hfov, animated, callback, callbackArgs) {
     animated = animated == undefined ? 1000: Number(animated);
-    if (pitch !== undefined) {
+    if (pitch !== undefined && Math.abs(pitch - config.pitch) > eps) {
         this.setPitch(pitch, animated, callback, callbackArgs);
         callback = undefined;
     }
-    if (yaw !== undefined) {
+    if (yaw !== undefined && Math.abs(yaw - config.yaw) > eps) {
         this.setYaw(yaw, animated, callback, callbackArgs);
         callback = undefined;
     }
-    if (hfov !== undefined)
+    if (hfov !== undefined && Math.abs(hfov - config.hfov) > eps) {
         this.setHfov(hfov, animated, callback, callbackArgs);
+        callback = undefined;
+    }
+    if (typeof callback == 'function')
+        callback(callbackArgs);
     return this;
 }
 
@@ -2862,7 +2928,8 @@ this.removeHotSpot = function(hotSpotId, sceneId) {
  * @instance
  */
 this.resize = function() {
-    onDocumentResize();
+    if (renderer)
+        onDocumentResize();
 }
 
 /**
